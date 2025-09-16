@@ -1,10 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight, PlusCircle, X, Edit2, Trash2, Play, Minimize, Maximize, Pause, SkipForward, SkipBack, Calendar, Zap, AlertTriangle, CheckCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { ChevronLeft, Play, Trash2, Edit2, Save, X, Plus, Video, Clock, Users, Shuffle, List, Calendar, AlertCircle, CheckCircle, RefreshCw, Eye, Settings, Radio } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
-import { Link } from 'react-router-dom';
-import IFrameVideoPlayer from '../../components/IFrameVideoPlayer';
-
 import {
   DndContext,
   closestCenter,
@@ -13,127 +11,714 @@ import {
   useSensors,
   DragEndEvent,
 } from '@dnd-kit/core';
-
 import {
   arrayMove,
   SortableContext,
   useSortable,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-
 import { CSS } from '@dnd-kit/utilities';
+import IFrameVideoPlayer from '../../components/IFrameVideoPlayer';
 
 interface Playlist {
   id: number;
   nome: string;
-  quantidadeVideos?: number;
-  duracaoTotal?: number;
-}
-
-interface Folder {
-  id: number;
-  nome: string;
+  data_criacao: string;
+  total_videos: number;
+  duracao_total: number;
+  comerciais?: 'sim' | 'nao';
+  status_transmissao?: 'ativa' | 'inativa' | 'pausada';
 }
 
 interface Video {
   id: number;
   nome: string;
-  url?: string;
-  duracao?: number;
-  tamanho?: number;
-  bitrate_video?: number;
-  formato_original?: string;
-  codec_video?: string;
-  is_mp4?: boolean;
-  compativel?: string;
-  compatibility_status?: string;
-  compatibility_message?: string;
-  needs_conversion?: boolean;
-  user_bitrate_limit?: number;
+  url: string;
+  caminho: string;
+  duracao: number;
+  duracao_segundos: number;
+  tamanho_arquivo: number;
+  bitrate_video: number;
+  formato_original: string;
+  largura: number;
+  altura: number;
+  ordem_playlist?: number;
+  tipo?: 'video' | 'comercial';
+  path_video?: string;
+  thumb?: string;
 }
 
-interface PlaylistAction {
-  type: 'start' | 'pause' | 'stop' | 'schedule';
-  playlistId: number;
-  playlistName: string;
+interface Folder {
+  id: number;
+  nome: string;
+  nome_sanitizado: string;
+  video_count_db: number;
+}
+
+interface ComercialConfig {
+  id?: number;
+  codigo_playlist: number;
+  pasta_comerciais: string;
+  quantidade_comerciais: number;
+  intervalo_videos: number;
+  ativo: boolean;
+}
+
+interface PlaylistVideo {
+  videos: Video;
+}
+
+interface TransmissionStatus {
+  is_live: boolean;
+  stream_type?: 'playlist' | 'obs';
+  transmission?: {
+    id: number;
+    titulo: string;
+    codigo_playlist: number;
+    wowza_stream_id: string;
+    use_smil: boolean;
+    stats: {
+      viewers: number;
+      bitrate: number;
+      uptime: string;
+      isActive: boolean;
+    };
+  };
+}
+
+function SortableVideoItem({ video, onRemove }: { video: Video; onRemove: (id: number) => void }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: video.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  const formatDuration = (seconds: number): string => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    
+    if (h > 0) {
+      return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let size = bytes;
+    let unitIndex = 0;
+    
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex++;
+    }
+    
+    return `${size.toFixed(2)} ${units[unitIndex]}`;
+  };
+
+  const getVideoIcon = () => {
+    if (video.tipo === 'comercial') {
+      return <div className="w-4 h-4 bg-yellow-500 rounded-full flex items-center justify-center">
+        <span className="text-xs text-white font-bold">C</span>
+      </div>;
+    }
+    return <Video className="h-4 w-4 text-blue-600" />;
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`flex items-center justify-between p-3 border rounded-lg ${
+        isDragging ? 'shadow-lg bg-blue-50' : 'bg-white border-gray-200'
+      } ${video.tipo === 'comercial' ? 'border-yellow-300 bg-yellow-50' : ''}`}
+    >
+      <div className="flex items-center space-x-3 flex-1">
+        <div
+          {...attributes}
+          {...listeners}
+          className="cursor-grab hover:cursor-grabbing text-gray-400 hover:text-gray-600"
+        >
+          <div className="flex flex-col items-center">
+            <div className="w-6 h-1 bg-gray-300 rounded mb-1"></div>
+            <div className="w-6 h-1 bg-gray-300 rounded"></div>
+          </div>
+        </div>
+        
+        {getVideoIcon()}
+        
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center space-x-2">
+            <h4 className="font-medium text-gray-900 truncate">{video.nome}</h4>
+            {video.tipo === 'comercial' && (
+              <span className="bg-yellow-100 text-yellow-800 text-xs font-medium px-2 py-1 rounded">
+                Comercial
+              </span>
+            )}
+          </div>
+          <div className="flex items-center space-x-4 text-sm text-gray-500">
+            <span className="flex items-center">
+              <Clock className="h-3 w-3 mr-1" />
+              {formatDuration(video.duracao_segundos || video.duracao || 0)}
+            </span>
+            {video.tamanho_arquivo && (
+              <span>{formatFileSize(video.tamanho_arquivo)}</span>
+            )}
+            {video.bitrate_video && (
+              <span>{video.bitrate_video} kbps</span>
+            )}
+            <span className="text-xs text-gray-400">
+              {video.formato_original?.toUpperCase() || 'MP4'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <button
+        onClick={() => onRemove(video.id)}
+        className="text-red-600 hover:text-red-800 p-1"
+        title="Remover da playlist"
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
+    </div>
+  );
 }
 
 const Playlists: React.FC = () => {
   const { getToken, user } = useAuth();
+  const navigate = useNavigate();
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
-  const [status, setStatus] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [showModal, setShowModal] = useState(false);
-  const [nomePlaylist, setNomePlaylist] = useState('');
-  const [editingId, setEditingId] = useState<number | null>(null);
-
+  const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
+  const [playlistVideos, setPlaylistVideos] = useState<Video[]>([]);
+  const [availableVideos, setAvailableVideos] = useState<Video[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
-  const [videosByFolder, setVideosByFolder] = useState<Record<number, Video[]>>({});
-  const [selectedVideos, setSelectedVideos] = useState<Video[]>([]);
-  const [expandedFolders, setExpandedFolders] = useState<Record<number, boolean>>({});
-
-  const [videoPlayerModalOpen, setVideoPlayerModalOpen] = useState(false);
-  const [playlistVideosToPlay, setPlaylistVideosToPlay] = useState<Video[]>([]);
-  const [playlistPlayerIndex, setPlaylistPlayerIndex] = useState(0);
-  const [currentVideoUrl, setCurrentVideoUrl] = useState<string>('');
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentPlaylistId, setCurrentPlaylistId] = useState<number | null>(null);
-
-  // Modal de confirmação
-  const [modalConfirmacao, setModalConfirmacao] = useState({
-    aberto: false,
-    playlist: null as Playlist | null,
-    titulo: '',
-    mensagem: '',
-    detalhes: ''
+  const [selectedFolder, setSelectedFolder] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+  const [showNewPlaylistModal, setShowNewPlaylistModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showVideoModal, setShowVideoModal] = useState(false);
+  const [showComercialModal, setShowComercialModal] = useState(false);
+  const [newPlaylistName, setNewPlaylistName] = useState('');
+  const [editingPlaylist, setEditingPlaylist] = useState<Playlist | null>(null);
+  const [editPlaylistName, setEditPlaylistName] = useState('');
+  const [currentVideo, setCurrentVideo] = useState<Video | null>(null);
+  const [transmissionStatus, setTransmissionStatus] = useState<TransmissionStatus | null>(null);
+  const [comercialConfig, setComercialConfig] = useState<ComercialConfig>({
+    codigo_playlist: 0,
+    pasta_comerciais: '',
+    quantidade_comerciais: 1,
+    intervalo_videos: 10,
+    ativo: true
   });
 
-  // Modal de ações da playlist
-  const [showActionModal, setShowActionModal] = useState(false);
-  const [selectedAction, setSelectedAction] = useState<PlaylistAction | null>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    })
+  );
 
-  const userBitrateLimit = user?.bitrate || 2500;
+  useEffect(() => {
+    loadPlaylists();
+    loadFolders();
+    checkTransmissionStatus();
+  }, []);
 
-  const closePlayerModal = () => {
-    setVideoPlayerModalOpen(false);
-    setPlaylistVideosToPlay([]);
-    setPlaylistPlayerIndex(0);
-    setCurrentVideoUrl('');
-    setIsFullscreen(false);
-    setIsPlaying(false);
-    setCurrentPlaylistId(null);
+  useEffect(() => {
+    if (selectedPlaylist) {
+      loadPlaylistVideos(selectedPlaylist.id);
+    }
+  }, [selectedPlaylist]);
+
+  useEffect(() => {
+    if (selectedFolder) {
+      loadVideosFromFolder(selectedFolder);
+    }
+  }, [selectedFolder]);
+
+  const checkTransmissionStatus = async () => {
+    try {
+      const token = await getToken();
+      const response = await fetch('/api/streaming/status', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setTransmissionStatus(data);
+      }
+    } catch (error) {
+      console.error('Erro ao verificar status de transmissão:', error);
+    }
   };
 
-  // Função para filtrar vídeos compatíveis
-  const filterCompatibleVideos = (videos: Video[]): Video[] => {
-    return videos.filter(video => {
-      // Verificar se é MP4
-      const isMP4 = video.is_mp4 || video.formato_original?.toLowerCase() === 'mp4';
+  const loadPlaylists = async () => {
+    try {
+      const token = await getToken();
+      const response = await fetch('/api/playlists', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await response.json();
+      setPlaylists(data);
       
-      // Verificar bitrate
-      const videoBitrate = video.bitrate_video || 0;
-      const bitrateOk = videoBitrate <= userBitrateLimit;
+      if (data.length > 0 && !selectedPlaylist) {
+        setSelectedPlaylist(data[0]);
+      }
+    } catch (error) {
+      toast.error('Erro ao carregar playlists');
+    }
+  };
+
+  const loadFolders = async () => {
+    try {
+      const token = await getToken();
+      const response = await fetch('/api/folders', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await response.json();
+      setFolders(data);
       
-      // Verificar status de compatibilidade
-      const isCompatible = video.compatibility_status === 'compatible' || 
-                          video.compatibility_message === 'Otimizado' ||
-                          video.compativel === 'otimizado' ||
-                          video.compativel === 'sim';
+      if (data.length > 0 && !selectedFolder) {
+        setSelectedFolder(data[0].id.toString());
+      }
+    } catch (error) {
+      toast.error('Erro ao carregar pastas');
+    }
+  };
+
+  const loadPlaylistVideos = async (playlistId: number) => {
+    try {
+      const token = await getToken();
+      const response = await fetch(`/api/playlists/${playlistId}/videos`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data: PlaylistVideo[] = await response.json();
       
-      // Não precisa conversão
-      const doesNotNeedConversion = !video.needs_conversion;
-      
-      // Retornar apenas vídeos que atendem todos os critérios
-      return isMP4 && bitrateOk && (isCompatible || doesNotNeedConversion);
+      // Extrair vídeos do formato retornado pela API
+      const videos = data.map(item => item.videos).sort((a, b) => (a.ordem_playlist || 0) - (b.ordem_playlist || 0));
+      setPlaylistVideos(videos);
+    } catch (error) {
+      console.error('Erro ao carregar vídeos da playlist:', error);
+      setPlaylistVideos([]);
+    }
+  };
+
+  const loadVideosFromFolder = async (folderId: string) => {
+    try {
+      const token = await getToken();
+      const response = await fetch(`/api/videos?folder_id=${folderId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await response.json();
+      setAvailableVideos(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Erro ao carregar vídeos da pasta:', error);
+      setAvailableVideos([]);
+    }
+  };
+
+  const createPlaylist = async () => {
+    if (!newPlaylistName.trim()) {
+      toast.error('Nome da playlist é obrigatório');
+      return;
+    }
+
+    try {
+      const token = await getToken();
+      const response = await fetch('/api/playlists', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ nome: newPlaylistName.trim() })
+      });
+
+      if (response.ok) {
+        const newPlaylist = await response.json();
+        toast.success('Playlist criada com sucesso!');
+        setShowNewPlaylistModal(false);
+        setNewPlaylistName('');
+        loadPlaylists();
+        
+        // Selecionar a nova playlist
+        const createdPlaylist = { 
+          id: newPlaylist.id, 
+          nome: newPlaylistName.trim(),
+          data_criacao: new Date().toISOString(),
+          total_videos: 0,
+          duracao_total: 0
+        };
+        setSelectedPlaylist(createdPlaylist);
+      } else {
+        const errorData = await response.json();
+        toast.error(errorData.error || 'Erro ao criar playlist');
+      }
+    } catch (error) {
+      console.error('Erro ao criar playlist:', error);
+      toast.error('Erro ao criar playlist');
+    }
+  };
+
+  const updatePlaylist = async () => {
+    if (!editingPlaylist || !editPlaylistName.trim()) {
+      toast.error('Nome da playlist é obrigatório');
+      return;
+    }
+
+    try {
+      const token = await getToken();
+      const response = await fetch(`/api/playlists/${editingPlaylist.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ 
+          nome: editPlaylistName.trim(),
+          videos: playlistVideos.map((video, index) => ({
+            id: video.id,
+            ordem: index
+          }))
+        })
+      });
+
+      if (response.ok) {
+        toast.success('Playlist atualizada com sucesso!');
+        setShowEditModal(false);
+        setEditingPlaylist(null);
+        setEditPlaylistName('');
+        loadPlaylists();
+        
+        // Atualizar playlist selecionada
+        if (selectedPlaylist?.id === editingPlaylist.id) {
+          setSelectedPlaylist(prev => prev ? { ...prev, nome: editPlaylistName.trim() } : null);
+        }
+      } else {
+        const errorData = await response.json();
+        toast.error(errorData.error || 'Erro ao atualizar playlist');
+      }
+    } catch (error) {
+      console.error('Erro ao atualizar playlist:', error);
+      toast.error('Erro ao atualizar playlist');
+    }
+  };
+
+  const deletePlaylist = async (playlist: Playlist) => {
+    // Verificar se playlist está em transmissão
+    if (transmissionStatus?.is_live && 
+        transmissionStatus.stream_type === 'playlist' && 
+        transmissionStatus.transmission?.codigo_playlist === playlist.id) {
+      toast.error('Não é possível excluir playlist em transmissão. Finalize a transmissão primeiro.');
+      return;
+    }
+
+    if (!confirm(`Deseja realmente excluir a playlist "${playlist.nome}"?`)) return;
+
+    try {
+      const token = await getToken();
+      const response = await fetch(`/api/playlists/${playlist.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (response.ok) {
+        toast.success('Playlist excluída com sucesso!');
+        loadPlaylists();
+        
+        if (selectedPlaylist?.id === playlist.id) {
+          setSelectedPlaylist(null);
+          setPlaylistVideos([]);
+        }
+      } else {
+        const errorData = await response.json();
+        toast.error(errorData.error || 'Erro ao excluir playlist');
+      }
+    } catch (error) {
+      console.error('Erro ao excluir playlist:', error);
+      toast.error('Erro ao excluir playlist');
+    }
+  };
+
+  const addVideoToPlaylist = (video: Video) => {
+    // Verificar se vídeo já está na playlist
+    if (playlistVideos.find(v => v.id === video.id)) {
+      toast.warning('Vídeo já está na playlist');
+      return;
+    }
+
+    const newVideo = {
+      ...video,
+      ordem_playlist: playlistVideos.length,
+      tipo: 'video' as const
+    };
+
+    setPlaylistVideos(prev => [...prev, newVideo]);
+    toast.success(`Vídeo "${video.nome}" adicionado à playlist`);
+  };
+
+  const removeVideoFromPlaylist = (videoId: number) => {
+    setPlaylistVideos(prev => prev.filter(v => v.id !== videoId));
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (over && active.id !== over.id) {
+      setPlaylistVideos(prev => {
+        const oldIndex = prev.findIndex(video => video.id === active.id);
+        const newIndex = prev.findIndex(video => video.id === over.id);
+        return arrayMove(prev, oldIndex, newIndex);
+      });
+    }
+  };
+
+  const shuffleVideos = () => {
+    setPlaylistVideos(prev => {
+      const shuffled = [...prev];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      return shuffled;
     });
+    toast.success('Vídeos embaralhados!');
   };
 
-  // Função para construir URL correta do vídeo
+  const savePlaylist = async () => {
+    if (!selectedPlaylist) {
+      toast.error('Selecione uma playlist');
+      return;
+    }
+
+    if (playlistVideos.length === 0) {
+      toast.error('Adicione pelo menos um vídeo à playlist');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const token = await getToken();
+      const response = await fetch(`/api/playlists/${selectedPlaylist.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          videos: playlistVideos.map((video, index) => ({
+            id: video.id,
+            ordem: index
+          }))
+        })
+      });
+
+      if (response.ok) {
+        toast.success('Playlist salva com sucesso!');
+        loadPlaylists();
+      } else {
+        const errorData = await response.json();
+        toast.error(errorData.error || 'Erro ao salvar playlist');
+      }
+    } catch (error) {
+      console.error('Erro ao salvar playlist:', error);
+      toast.error('Erro ao salvar playlist');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveAndStartPlaylist = async () => {
+    if (!selectedPlaylist) {
+      toast.error('Selecione uma playlist');
+      return;
+    }
+
+    if (playlistVideos.length === 0) {
+      toast.error('Adicione pelo menos um vídeo à playlist');
+      return;
+    }
+
+    // Verificar se já há transmissão ativa
+    if (transmissionStatus?.is_live) {
+      toast.error('Já existe uma transmissão ativa. Finalize-a antes de iniciar uma nova.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const token = await getToken();
+      
+      // Primeiro salvar a playlist
+      await fetch(`/api/playlists/${selectedPlaylist.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          videos: playlistVideos.map((video, index) => ({
+            id: video.id,
+            ordem: index
+          }))
+        })
+      });
+
+      // Depois iniciar transmissão
+      const transmissionResponse = await fetch('/api/streaming/start', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          titulo: `Transmissão: ${selectedPlaylist.nome}`,
+          descricao: `Playlist ${selectedPlaylist.nome} com ${playlistVideos.length} vídeos`,
+          playlist_id: selectedPlaylist.id,
+          platform_ids: [], // Sem plataformas por padrão
+          use_smil: true,
+          enable_recording: false
+        })
+      });
+
+      const transmissionResult = await transmissionResponse.json();
+
+      if (transmissionResult.success) {
+        toast.success('Playlist salva e transmissão iniciada!');
+        checkTransmissionStatus();
+        
+        // Redirecionar para página de transmissão
+        navigate('/dashboard/iniciar-transmissao');
+      } else {
+        toast.error(transmissionResult.error || 'Erro ao iniciar transmissão');
+      }
+    } catch (error) {
+      console.error('Erro ao salvar e iniciar playlist:', error);
+      toast.error('Erro ao salvar e iniciar playlist');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const addComercials = async () => {
+    if (!selectedPlaylist || !comercialConfig.pasta_comerciais) {
+      toast.error('Selecione uma playlist e uma pasta de comerciais');
+      return;
+    }
+
+    try {
+      const token = await getToken();
+      
+      // Buscar vídeos da pasta de comerciais
+      const comercialFolder = folders.find(f => f.nome_sanitizado === comercialConfig.pasta_comerciais);
+      if (!comercialFolder) {
+        toast.error('Pasta de comerciais não encontrada');
+        return;
+      }
+
+      const response = await fetch(`/api/videos?folder_id=${comercialFolder.id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const comercialVideos = await response.json();
+
+      if (!Array.isArray(comercialVideos) || comercialVideos.length === 0) {
+        toast.error('Nenhum vídeo encontrado na pasta de comerciais');
+        return;
+      }
+
+      // Aplicar lógica de inserção de comerciais baseada no código PHP
+      const videosComComerciais = insertComercials(playlistVideos, comercialVideos, comercialConfig);
+      setPlaylistVideos(videosComComerciais);
+      
+      toast.success(`${comercialVideos.length} comerciais inseridos na playlist!`);
+      setShowComercialModal(false);
+    } catch (error) {
+      console.error('Erro ao adicionar comerciais:', error);
+      toast.error('Erro ao adicionar comerciais');
+    }
+  };
+
+  // Função para inserir comerciais baseada na lógica do PHP
+  const insertComercials = (videos: Video[], comerciais: Video[], config: ComercialConfig): Video[] => {
+    const result: Video[] = [];
+    let comercialIndex = 0;
+    let videoCount = 0;
+
+    for (let i = 0; i < videos.length; i++) {
+      const video = videos[i];
+      
+      // Adicionar vídeo normal
+      if (video.tipo !== 'comercial') {
+        result.push({ ...video, ordem_playlist: result.length });
+        videoCount++;
+
+        // Verificar se deve inserir comerciais
+        if (videoCount === config.intervalo_videos && comerciais.length > 0) {
+          // Inserir quantidade especificada de comerciais
+          for (let j = 0; j < config.quantidade_comerciais; j++) {
+            if (comercialIndex >= comerciais.length) {
+              comercialIndex = 0; // Reiniciar ciclo de comerciais
+            }
+
+            const comercial = comerciais[comercialIndex];
+            result.push({
+              ...comercial,
+              id: comercial.id + 10000 + j, // ID único para comerciais
+              tipo: 'comercial',
+              ordem_playlist: result.length
+            });
+
+            comercialIndex++;
+          }
+          
+          videoCount = 0; // Resetar contador
+        }
+      }
+    }
+
+    return result;
+  };
+
+  const openVideoPlayer = (video: Video) => {
+    setCurrentVideo(video);
+    setShowVideoModal(true);
+  };
+
+  const closeVideoPlayer = () => {
+    setShowVideoModal(false);
+    setCurrentVideo(null);
+  };
+
   const buildVideoUrl = (video: Video) => {
     if (!video.url) return '';
-    
-    // Extrair informações do caminho
+
+    // Para vídeos da playlist, construir URL do player na porta do sistema
+    const baseUrl = process.env.NODE_ENV === 'production' 
+      ? 'http://samhost.wcore.com.br:3001'
+      : 'http://localhost:3001';
+
+    // Se é um vídeo de playlist em transmissão, usar URL de playlist
+    if (transmissionStatus?.is_live && 
+        transmissionStatus.stream_type === 'playlist' && 
+        transmissionStatus.transmission?.codigo_playlist === selectedPlaylist?.id) {
+      
+      const userLogin = user?.usuario || (user?.email ? user.email.split('@')[0] : `user_${user?.id}`);
+      return `${baseUrl}/api/player-port/iframe?playlist=${selectedPlaylist.id}&login=${userLogin}&player=1&contador=true`;
+    }
+
+    // Para vídeos individuais, usar URL do vídeo específico
     const cleanPath = video.url.replace(/^\/+/, '').replace(/^(content\/|streaming\/)?/, '');
     const pathParts = cleanPath.split('/');
     
@@ -141,1189 +726,651 @@ const Playlists: React.FC = () => {
       const userLogin = pathParts[0];
       const folderName = pathParts[1];
       const fileName = pathParts[2];
-      
       const finalFileName = fileName.endsWith('.mp4') ? fileName : fileName.replace(/\.[^/.]+$/, '.mp4');
-      const domain = 'stmv1.udicast.com';
       
-      return `https://${domain}:1443/play.php?login=${userLogin}&video=${folderName}/${finalFileName}`;
+      return `${baseUrl}/api/player-port/iframe?login=${userLogin}&vod=${folderName}/${finalFileName}&player=1`;
     }
-    
+
     return '';
   };
 
-  const carregarPlaylists = async () => {
-    try {
-      setStatus(null);
-      const token = await getToken();
-      if (!token) {
-        setStatus('Usuário não autenticado');
-        return;
-      }
-
-      const response = await fetch('/api/playlists', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error('Erro ao carregar playlists');
-      }
-
-      const playlistsData = await response.json();
-      
-      // Carregar estatísticas para cada playlist
-      const playlistsComStats = await Promise.all(
-        playlistsData.map(async (playlist: Playlist) => {
-          try {
-            const videosResponse = await fetch(`/api/playlists/${playlist.id}/videos`, {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-              },
-            });
-
-            if (videosResponse.ok) {
-              const playlistVideos = await videosResponse.json();
-              const quantidadeVideos = playlistVideos.length;
-              const duracaoTotal = playlistVideos.reduce((acc: number, item: any) => {
-                const duracao = item.videos?.duracao || 0;
-                return acc + Math.ceil(duracao);
-              }, 0);
-
-              return { ...playlist, quantidadeVideos, duracaoTotal };
-            }
-          } catch (error) {
-            console.error(`Erro ao carregar vídeos da playlist ${playlist.id}:`, error);
-          }
-
-          return { ...playlist, quantidadeVideos: 0, duracaoTotal: 0 };
-        })
-      );
-
-      setPlaylists(playlistsComStats);
-    } catch (error) {
-      console.error('Erro ao carregar playlists:', error);
-      setStatus('Erro ao carregar playlists');
-    }
-  };
-
-  const carregarFoldersEVideos = async () => {
-    try {
-      const token = await getToken();
-      if (!token) return;
-
-      // Carregar folders
-      const foldersResponse = await fetch('/api/folders', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!foldersResponse.ok) {
-        throw new Error('Erro ao carregar pastas');
-      }
-
-      const foldersData = await foldersResponse.json();
-      setFolders(foldersData);
-      setExpandedFolders(Object.fromEntries(foldersData.map((f: Folder) => [f.id, false])));
-
-      // Carregar vídeos para cada folder
-      const grouped: Record<number, Video[]> = {};
-      foldersData.forEach((f: Folder) => grouped[f.id] = []);
-
-      for (const folder of foldersData) {
-        try {
-          const videosResponse = await fetch(`/api/videos?folder_id=${folder.id}`, {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            },
-          });
-
-          if (videosResponse.ok) {
-            const videosData = await videosResponse.json();
-            // Filtrar apenas vídeos compatíveis
-            const compatibleVideos = filterCompatibleVideos(videosData);
-            grouped[folder.id] = compatibleVideos;
-          }
-        } catch (error) {
-          console.error(`Erro ao carregar vídeos da pasta ${folder.id}:`, error);
-        }
-      }
-
-      setVideosByFolder(grouped);
-    } catch (error) {
-      console.error('Erro ao carregar pastas e vídeos:', error);
-    }
-  };
-
-  useEffect(() => {
-    carregarPlaylists();
-  }, []);
-
-  const abrirModal = async (playlist?: Playlist) => {
-    setStatus(null);
-    await carregarFoldersEVideos();
+  const formatDuration = (seconds: number): string => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
     
-    if (playlist) {
-      setNomePlaylist(playlist.nome ?? '');
-      setEditingId(playlist.id);
-      
-      try {
-        const token = await getToken();
-        const response = await fetch(`/api/playlists/${playlist.id}/videos`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        });
-
-        if (response.ok) {
-          const selected = await response.json();
-          setSelectedVideos(selected.map((item: any) => item.videos));
-        }
-      } catch (error) {
-        console.error('Erro ao carregar vídeos da playlist:', error);
-      }
-    } else {
-      setNomePlaylist('');
-      setEditingId(null);
-      setSelectedVideos([]);
+    if (h > 0) {
+      return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
     }
-    setShowModal(true);
+    return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  const salvarPlaylist = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    
-    try {
-      const token = await getToken();
-      if (!token) {
-        setStatus('Usuário não autenticado');
-        return;
-      }
+  const getTotalDuration = () => {
+    return playlistVideos.reduce((total, video) => total + (video.duracao_segundos || video.duracao || 0), 0);
+  };
 
-      let playlistId = editingId;
+  const getPlaylistStatus = (playlist: Playlist) => {
+    if (transmissionStatus?.is_live && 
+        transmissionStatus.stream_type === 'playlist' && 
+        transmissionStatus.transmission?.codigo_playlist === playlist.id) {
+      return 'ativa';
+    }
+    return 'inativa';
+  };
 
-      if (editingId) {
-        // Atualizar playlist existente
-        const response = await fetch(`/api/playlists/${editingId}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            nome: nomePlaylist,
-            videos: selectedVideos.map((video, index) => ({
-              id: video.id,
-              ordem: index
-            }))
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error('Erro ao atualizar playlist');
-        }
-      } else {
-        // Criar nova playlist
-        const response = await fetch('/api/playlists', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify({ nome: nomePlaylist }),
-        });
-
-        if (!response.ok) {
-          throw new Error('Erro ao criar playlist');
-        }
-
-        const data = await response.json();
-        playlistId = data.id;
-
-        // Adicionar vídeos à playlist
-        if (playlistId && selectedVideos.length > 0) {
-          const updateResponse = await fetch(`/api/playlists/${playlistId}`, {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              nome: nomePlaylist,
-              videos: selectedVideos.map((video, index) => ({
-                id: video.id,
-                ordem: index
-              }))
-            }),
-          });
-
-          if (!updateResponse.ok) {
-            throw new Error('Erro ao adicionar vídeos à playlist');
-          }
-        }
-      }
-
-      setShowModal(false);
-      setNomePlaylist('');
-      setEditingId(null);
-      setSelectedVideos([]);
-      carregarPlaylists();
-      toast.success('Playlist salva com sucesso!');
-    } catch (err: any) {
-      setStatus(err.message || 'Erro ao salvar playlist');
-      toast.error(err.message || 'Erro ao salvar playlist');
-    } finally {
-      setLoading(false);
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'ativa': return 'bg-red-100 text-red-800';
+      case 'pausada': return 'bg-yellow-100 text-yellow-800';
+      default: return 'bg-gray-100 text-gray-800';
     }
   };
 
-  const confirmarDeletarPlaylist = (playlist: Playlist) => {
-    setModalConfirmacao({
-      aberto: true,
-      playlist,
-      titulo: 'Confirmar Exclusão da Playlist',
-      mensagem: `Deseja realmente excluir a playlist "${playlist.nome}"?`,
-      detalhes: 'Esta ação não pode ser desfeita. Certifique-se de que a playlist não está sendo usada em transmissões ou agendamentos.'
-    });
-  };
-
-  const executarDelecaoPlaylist = async () => {
-    const { playlist } = modalConfirmacao;
-    if (!playlist) return;
-
-    try {
-      const token = await getToken();
-      const response = await fetch(`/api/playlists/${playlist.id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        toast.error(errorData.details || errorData.error || 'Erro ao excluir playlist');
-        return;
-      }
-
-      toast.success('Playlist excluída com sucesso!');
-      carregarPlaylists();
-    } catch (error) {
-      toast.error('Erro ao excluir playlist');
-      console.error('Erro na exclusão:', error);
-    } finally {
-      setModalConfirmacao({
-        aberto: false,
-        playlist: null,
-        titulo: '',
-        mensagem: '',
-        detalhes: ''
-      });
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'ativa': return 'AO VIVO';
+      case 'pausada': return 'PAUSADA';
+      default: return 'OFFLINE';
     }
   };
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 5,
-      },
-    }),
-  );
-
-  const onDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over) return;
-    if (
-      active.id.toString().startsWith('selected-') &&
-      over.id.toString().startsWith('selected-')
-    ) {
-      const oldIndex = Number(active.id.toString().replace('selected-', ''));
-      const newIndex = Number(over.id.toString().replace('selected-', ''));
-      if (oldIndex !== newIndex) {
-        setSelectedVideos((items) => arrayMove(items, oldIndex, newIndex));
-      }
-    } else if (
-      active.id.toString().startsWith('available-') &&
-      (over.id.toString() === 'selected-container' ||
-        over.id.toString().startsWith('selected-'))
-    ) {
-      const videoId = Number(active.id.toString().replace('available-', ''));
-      const video = Object.values(videosByFolder)
-        .flat()
-        .find((v) => v.id === videoId);
-      if (video) {
-        setSelectedVideos((prev) => [...prev, video]);
-      }
-    }
-  };
-
-  function AvailableVideo({ video, index }: { video: Video; index: number }) {
-    const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: `available-${video.id}` });
-    const style = {
-      transform: CSS.Translate.toString(transform),
-      transition,
-      cursor: 'grab',
-    };
-
-    const getCompatibilityIcon = () => {
-      if (video.compatibility_status === 'compatible' || video.compatibility_message === 'Otimizado') {
-        return <CheckCircle className="h-4 w-4 text-green-600" />;
-      } else if (video.needs_conversion) {
-        return <AlertTriangle className="h-4 w-4 text-red-600" />;
-      }
-      return <CheckCircle className="h-4 w-4 text-green-600" />;
-    };
-
-    const getBitrateColor = () => {
-      const bitrate = video.bitrate_video || 0;
-      if (bitrate > userBitrateLimit) return 'text-red-600';
-      if (bitrate > userBitrateLimit * 0.8) return 'text-yellow-600';
-      return 'text-green-600';
-    };
-
-    return (
-      <li
-        ref={setNodeRef}
-        style={style}
-        {...attributes}
-        {...listeners}
-        className="p-2 text-sm hover:bg-zinc-100 rounded flex justify-between items-center cursor-pointer border border-gray-200 mb-1"
-      >
-        <div className="flex-1 min-w-0" onClick={() => setSelectedVideos((prev) => [...prev, video])}>
-          <div className="flex items-center space-x-2">
-            {getCompatibilityIcon()}
-            <span className="truncate">{video.nome}</span>
-          </div>
-          <div className="flex items-center space-x-3 mt-1">
-            <span className={`text-xs font-medium ${getBitrateColor()}`}>
-              <Zap className="h-3 w-3 inline mr-1" />
-              {video.bitrate_video || 0} kbps
-            </span>
-            <span className="text-xs text-gray-500">
-              {video.formato_original?.toUpperCase() || 'MP4'}
-            </span>
-            {video.duracao && (
-              <span className="text-xs text-gray-500">
-                {formatarDuracao(video.duracao)}
-              </span>
-            )}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            const videoUrl = buildVideoUrl(video);
-            if (videoUrl) {
-              setCurrentVideoUrl(videoUrl);
-              setPlaylistVideosToPlay([video]);
-              setPlaylistPlayerIndex(0);
-              setVideoPlayerModalOpen(true);
-            } else {
-              toast.error('Não foi possível construir URL do vídeo');
-            }
-          }}
-          className="text-blue-600 hover:text-blue-800 p-1 ml-2"
-          title="Assistir vídeo"
-        >
-          <Play size={16} />
-        </button>
-      </li>
-    );
-  }
-
-  function SelectedVideo({ video, index }: { video: Video; index: number }) {
-    const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: `selected-${index}` });
-    const style = {
-      transform: CSS.Translate.toString(transform),
-      transition,
-      cursor: 'grab',
-    };
-
-    const getBitrateColor = () => {
-      const bitrate = video.bitrate_video || 0;
-      if (bitrate > userBitrateLimit) return 'text-red-600';
-      if (bitrate > userBitrateLimit * 0.8) return 'text-yellow-600';
-      return 'text-green-600';
-    };
-
-    return (
-      <li
-        ref={setNodeRef}
-        style={style}
-        {...attributes}
-        {...listeners}
-        className="flex justify-between items-center p-3 mb-2 bg-zinc-100 rounded cursor-move border border-gray-300"
-      >
-        <div className="flex-1 min-w-0">
-          <div className="font-medium truncate">{video.nome}</div>
-          <div className="flex items-center space-x-3 mt-1">
-            <span className={`text-xs font-medium ${getBitrateColor()}`}>
-              <Zap className="h-3 w-3 inline mr-1" />
-              {video.bitrate_video || 0} kbps
-            </span>
-            <span className="text-xs text-gray-500">
-              {video.formato_original?.toUpperCase() || 'MP4'}
-            </span>
-            {video.duracao && (
-              <span className="text-xs text-gray-500">
-                {formatarDuracao(video.duracao)}
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-500 bg-gray-200 px-2 py-1 rounded">
-            #{index + 1}
-          </span>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              const videoUrl = buildVideoUrl(video);
-              if (videoUrl) {
-                setCurrentVideoUrl(videoUrl);
-                setPlaylistVideosToPlay([video]);
-                setPlaylistPlayerIndex(0);
-                setVideoPlayerModalOpen(true);
-              } else {
-                toast.error('Não foi possível construir URL do vídeo');
-              }
-            }}
-            className="text-blue-600 hover:text-blue-800 p-1"
-            title="Assistir vídeo"
-          >
-            <Play size={16} />
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedVideos((prev) => {
-                const copy = [...prev];
-                copy.splice(index, 1);
-                return copy;
-              });
-            }}
-            className="text-red-600 hover:text-red-800 p-1"
-            title="Remover vídeo"
-          >
-            <X size={16} />
-          </button>
-        </div>
-      </li>
-    );
-  }
-
-  const adicionarTodosDaPasta = (folderId: number) => {
-    const videos = videosByFolder[folderId] || [];
-    const compatibleVideos = filterCompatibleVideos(videos);
-    
-    if (compatibleVideos.length === 0) {
-      toast.warning('Esta pasta não possui vídeos compatíveis (MP4 dentro do limite de bitrate)');
-      return;
-    }
-    
-    setSelectedVideos(prev => [...prev, ...compatibleVideos]);
-    toast.success(`${compatibleVideos.length} vídeo(s) compatível(is) adicionado(s)`);
-  };
-
-  const removerTodos = () => setSelectedVideos([]);
-
-  const toggleFolder = (id: number) => setExpandedFolders(prev => ({ ...prev, [id]: !prev[id] }));
-
-  const formatarDuracao = (s: number) =>
-    [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60]
-      .map(v => String(v).padStart(2, '0'))
-      .join(':');
-
-  const abrirPlayerPlaylist = async (playlistId: number) => {
-    setCurrentPlaylistId(playlistId);
-    setPlaylistVideosToPlay([]);
-    setPlaylistPlayerIndex(0);
-    setVideoPlayerModalOpen(false);
-
-    try {
-      const token = await getToken();
-      const response = await fetch(`/api/playlists/${playlistId}/videos`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        toast.error('Erro ao carregar vídeos da playlist');
-        return;
-      }
-
-      const playlistVideos = await response.json();
-      const videos: Video[] = playlistVideos.map((item: any) => item.videos);
-      
-      if (videos.length === 0) {
-        toast.warning('Esta playlist não possui vídeos');
-        return;
-      }
-      
-      setPlaylistVideosToPlay(videos);
-      setPlaylistPlayerIndex(0);
-      
-      // Construir URL do primeiro vídeo
-      const firstVideoUrl = buildVideoUrl(videos[0]);
-      if (firstVideoUrl) {
-        setCurrentVideoUrl(firstVideoUrl);
-        setVideoPlayerModalOpen(true);
-        setIsPlaying(true);
-      } else {
-        toast.error('Não foi possível construir URL do primeiro vídeo');
-      }
-    } catch (error) {
-      console.error('Erro ao carregar playlist:', error);
-      toast.error('Erro ao carregar vídeos da playlist');
-    }
-  };
-
-  const handleVideoEnded = () => {
-    if (playlistPlayerIndex < playlistVideosToPlay.length - 1) {
-      const nextIndex = playlistPlayerIndex + 1;
-      setPlaylistPlayerIndex(nextIndex);
-      
-      const nextVideoUrl = buildVideoUrl(playlistVideosToPlay[nextIndex]);
-      if (nextVideoUrl) {
-        setCurrentVideoUrl(nextVideoUrl);
-      }
-    } else {
-      // Repetir playlist do início
-      setPlaylistPlayerIndex(0);
-      const firstVideoUrl = buildVideoUrl(playlistVideosToPlay[0]);
-      if (firstVideoUrl) {
-        setCurrentVideoUrl(firstVideoUrl);
-      }
-    }
-  };
-
-  const goToPreviousVideo = () => {
-    if (playlistPlayerIndex > 0) {
-      const prevIndex = playlistPlayerIndex - 1;
-      setPlaylistPlayerIndex(prevIndex);
-      
-      const prevVideoUrl = buildVideoUrl(playlistVideosToPlay[prevIndex]);
-      if (prevVideoUrl) {
-        setCurrentVideoUrl(prevVideoUrl);
-      }
-    }
-  };
-
-  const goToNextVideo = () => {
-    if (playlistPlayerIndex < playlistVideosToPlay.length - 1) {
-      const nextIndex = playlistPlayerIndex + 1;
-      setPlaylistPlayerIndex(nextIndex);
-      
-      const nextVideoUrl = buildVideoUrl(playlistVideosToPlay[nextIndex]);
-      if (nextVideoUrl) {
-        setCurrentVideoUrl(nextVideoUrl);
-      }
-    }
-  };
-
-  const openActionModal = (playlist: Playlist, actionType: 'start' | 'pause' | 'stop' | 'schedule') => {
-    setSelectedAction({
-      type: actionType,
-      playlistId: playlist.id,
-      playlistName: playlist.nome
-    });
-    setShowActionModal(true);
-  };
-
-  const executePlaylistAction = async () => {
-    if (!selectedAction) return;
-
-    try {
-      const token = await getToken();
-      
-      switch (selectedAction.type) {
-        case 'start':
-          // Iniciar transmissão da playlist
-          const startResponse = await fetch('/api/streaming/start', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`
-            },
-            body: JSON.stringify({
-              titulo: `Transmissão: ${selectedAction.playlistName}`,
-              playlist_id: selectedAction.playlistId,
-              platform_ids: [], // Sem plataformas por padrão
-              use_smil: true // Usar SMIL para playlists
-            })
-          });
-
-          if (startResponse.ok) {
-            const result = await startResponse.json();
-            if (result.success) {
-              toast.success('Transmissão da playlist iniciada!');
-              
-              // Mostrar informações do player gerado
-              if (result.player_urls) {
-                const playerInfo = `
-Player URL: ${result.player_urls.iframe_url}
-HLS URL: ${result.player_urls.hls_url}
-                `;
-                console.log('URLs do player geradas:', result.player_urls);
-              }
-            } else {
-              toast.error(result.error || 'Erro ao iniciar transmissão');
-            }
-          } else {
-            const errorData = await startResponse.json();
-            toast.error(errorData.error || 'Erro ao iniciar transmissão');
-          }
-          break;
-
-        case 'schedule':
-          // Redirecionar para agendamentos
-          window.location.href = `/dashboard/agendamentos?playlist=${selectedAction.playlistId}`;
-          break;
-
-        case 'pause':
-        case 'stop':
-          // Parar transmissão
-          const stopResponse = await fetch('/api/streaming/stop', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`
-            },
-            body: JSON.stringify({
-              stream_type: 'playlist'
-            })
-          });
-
-          if (stopResponse.ok) {
-            toast.success('Transmissão pausada/parada!');
-          } else {
-            toast.error('Erro ao parar transmissão');
-          }
-          break;
-      }
-    } catch (error) {
-      console.error('Erro ao executar ação:', error);
-      toast.error('Erro ao executar ação');
-    } finally {
-      setShowActionModal(false);
-      setSelectedAction(null);
-    }
-  };
-
-  // Modal de confirmação
-  function ModalConfirmacao({
-    aberto,
-    onFechar,
-    onConfirmar,
-    titulo,
-    mensagem,
-    detalhes,
-  }: {
-    aberto: boolean;
-    onFechar: () => void;
-    onConfirmar: () => void;
-    titulo: string;
-    mensagem: string;
-    detalhes?: string;
-  }) {
-    if (!aberto) return null;
-
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">{titulo}</h3>
-          <p className="text-gray-700 mb-4">{mensagem}</p>
-          {detalhes && (
-            <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3 mb-4">
-              <p className="text-sm text-yellow-800">{detalhes}</p>
-            </div>
-          )}
-          <div className="flex justify-end space-x-3">
-            <button
-              onClick={onFechar}
-              className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={onConfirmar}
-              className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
-            >
-              Confirmar Exclusão
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
-    <div className="p-4 sm:p-6 w-full h-full min-h-screen bg-white max-w-full overflow-x-hidden">
-      <header className="flex flex-col sm:flex-row items-center justify-between mb-6 gap-4">
-        <h1 className="text-3xl font-extrabold text-gray-900">Playlists</h1>
+    <div className="space-y-6">
+      <div className="flex items-center mb-6">
+        <Link to="/dashboard" className="flex items-center text-primary-600 hover:text-primary-800">
+          <ChevronLeft className="h-5 w-5 mr-1" />
+          <span>Voltar ao Dashboard</span>
+        </Link>
+      </div>
 
-        <button
-          className="bg-blue-600 text-white px-5 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 transition-colors duration-200 shadow"
-          onClick={() => abrirModal()}
-        >
-          <PlusCircle size={20} />
-          Nova Playlist
-        </button>
-      </header>
-
-      {/* Informações sobre filtros */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-        <div className="flex items-start">
-          <CheckCircle className="h-5 w-5 text-blue-600 mr-3 mt-0.5" />
-          <div>
-            <h3 className="text-blue-900 font-medium mb-2">Sistema de Playlists e Transmissão</h3>
-            <ul className="text-blue-800 text-sm space-y-1">
-              <li>• <strong>Apenas vídeos MP4:</strong> Formato otimizado para streaming</li>
-              <li>• <strong>Bitrate dentro do limite:</strong> Máximo {userBitrateLimit} kbps (seu plano)</li>
-              <li>• <strong>Vídeos otimizados:</strong> Prontos para transmissão sem conversão</li>
-              <li>• <strong>Indicador de bitrate:</strong> <span className="text-green-600">Verde (OK)</span>, <span className="text-yellow-600">Amarelo (Alto)</span>, <span className="text-red-600">Vermelho (Excede)</span></li>
-              <li>• <strong>Iniciar Playlist:</strong> Transmite a playlist internamente no sistema</li>
-              <li>• <strong>Visualização:</strong> Use a página "Players" para obter códigos de incorporação</li>
-              <li>• <strong>Arquivo SMIL:</strong> Gerado automaticamente para controle de reprodução</li>
-            </ul>
-          </div>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-3">
+          <List className="h-8 w-8 text-primary-600" />
+          <h1 className="text-3xl font-bold text-gray-900">Gerenciar Playlists</h1>
+        </div>
+        
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={checkTransmissionStatus}
+            className="text-primary-600 hover:text-primary-800 flex items-center text-sm"
+          >
+            <RefreshCw className="h-4 w-4 mr-1" />
+            Atualizar Status
+          </button>
+          <button
+            onClick={() => setShowNewPlaylistModal(true)}
+            className="bg-primary-600 text-white px-4 py-2 rounded-md hover:bg-primary-700 flex items-center"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Nova Playlist
+          </button>
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-gray-300 shadow-sm bg-white">
-        <table className="w-full min-w-[500px] sm:min-w-[600px] border-collapse bg-white">
-          <thead className="bg-blue-50">
-            <tr>
-              <th className="text-left p-4 font-semibold text-blue-800 border-b border-blue-100">Nome</th>
-              <th className="text-center p-2 sm:p-4 font-semibold text-blue-800 border-b border-blue-100 w-20 sm:w-28">Qtd. Vídeos</th>
-              <th className="text-center p-2 sm:p-4 font-semibold text-blue-800 border-b border-blue-100 w-24 sm:w-36 hidden sm:table-cell">Duração Total</th>
-              <th className="text-center p-2 sm:p-4 font-semibold text-blue-800 border-b border-blue-100 w-32 sm:w-48">Ações</th>
-            </tr>
-          </thead>
-          <tbody>
-            {playlists.length === 0 && (
-              <tr>
-                <td colSpan={4} className="text-center text-gray-500 p-4 sm:p-6 text-sm">
-                  Nenhuma playlist criada
-                </td>
-              </tr>
-            )}
-            {playlists.map((playlist) => (
-              <tr
-                key={playlist.id}
-                className="cursor-pointer transition-colors duration-150 hover:bg-blue-50"
+      {/* Status de Transmissão */}
+      {transmissionStatus?.is_live && transmissionStatus.stream_type === 'playlist' && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse mr-3"></div>
+              <div>
+                <h2 className="text-lg font-semibold text-red-800">PLAYLIST EM TRANSMISSÃO</h2>
+                <p className="text-red-600 text-sm">
+                  Playlist ID: {transmissionStatus.transmission?.codigo_playlist} • 
+                  Espectadores: {transmissionStatus.transmission?.stats.viewers || 0} • 
+                  Tempo: {transmissionStatus.transmission?.stats.uptime || '00:00:00'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => {
+                  const userLogin = user?.usuario || (user?.email ? user.email.split('@')[0] : `user_${user?.id}`);
+                  const baseUrl = process.env.NODE_ENV === 'production' 
+                    ? 'http://samhost.wcore.com.br:3001'
+                    : 'http://localhost:3001';
+                  const playerUrl = `${baseUrl}/api/player-port/iframe?playlist=${transmissionStatus.transmission?.codigo_playlist}&login=${userLogin}&player=1&contador=true`;
+                  window.open(playerUrl, '_blank');
+                }}
+                className="bg-blue-600 text-white px-3 py-2 rounded-md hover:bg-blue-700 flex items-center text-sm"
               >
-                <td className="p-2 sm:p-4 max-w-[150px] sm:max-w-xs truncate text-sm sm:text-base">{playlist.nome}</td>
-                <td className="p-2 sm:p-4 text-center text-sm sm:text-base">{playlist.quantidadeVideos ?? 0}</td>
-                <td className="p-2 sm:p-4 text-center text-sm sm:text-base hidden sm:table-cell">
-                  {playlist.duracaoTotal ? formatarDuracao(playlist.duracaoTotal) : '00:00:00'}
-                </td>
-                <td className="p-2 sm:p-4">
-                  <div className="flex justify-center gap-1 sm:gap-2 flex-wrap">
+                <Eye className="h-4 w-4 mr-1" />
+                Visualizar
+              </button>
+              <button
+                onClick={() => navigate('/dashboard/iniciar-transmissao')}
+                className="bg-red-600 text-white px-3 py-2 rounded-md hover:bg-red-700 flex items-center text-sm"
+              >
+                <Settings className="h-4 w-4 mr-1" />
+                Gerenciar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Lista de Playlists */}
+        <div className="bg-white rounded-lg shadow-sm p-6">
+          <h2 className="text-xl font-semibold text-gray-800 mb-4">Playlists</h2>
+          
+          {playlists.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              <List className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+              <p>Nenhuma playlist criada</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {playlists.map((playlist) => {
+                const status = getPlaylistStatus(playlist);
+                return (
+                  <div
+                    key={playlist.id}
+                    className={`border rounded-lg p-4 cursor-pointer transition-all ${
+                      selectedPlaylist?.id === playlist.id
+                        ? 'border-primary-500 bg-primary-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                    onClick={() => setSelectedPlaylist(playlist)}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="font-medium text-gray-900 truncate">{playlist.nome}</h3>
+                      <div className="flex items-center space-x-2">
+                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(status)}`}>
+                          {getStatusText(status)}
+                        </span>
+                        <div className="flex items-center space-x-1">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingPlaylist(playlist);
+                              setEditPlaylistName(playlist.nome);
+                              setShowEditModal(true);
+                            }}
+                            className="text-blue-600 hover:text-blue-800 p-1"
+                            title="Editar playlist"
+                          >
+                            <Edit2 className="h-3 w-3" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deletePlaylist(playlist);
+                            }}
+                            className="text-red-600 hover:text-red-800 p-1"
+                            title="Excluir playlist"
+                            disabled={status === 'ativa'}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center justify-between text-sm text-gray-500">
+                      <span className="flex items-center">
+                        <Video className="h-3 w-3 mr-1" />
+                        {playlist.total_videos || 0} vídeos
+                      </span>
+                      <span className="flex items-center">
+                        <Clock className="h-3 w-3 mr-1" />
+                        {formatDuration(playlist.duracao_total || 0)}
+                      </span>
+                    </div>
+                    
+                    {playlist.comerciais === 'sim' && (
+                      <div className="mt-2">
+                        <span className="bg-yellow-100 text-yellow-800 text-xs font-medium px-2 py-1 rounded">
+                          Com Comerciais
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Vídeos Disponíveis */}
+        <div className="bg-white rounded-lg shadow-sm p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold text-gray-800">Vídeos Disponíveis</h2>
+            <button
+              onClick={() => setShowComercialModal(true)}
+              disabled={!selectedPlaylist}
+              className="bg-yellow-600 text-white px-3 py-2 rounded-md hover:bg-yellow-700 disabled:opacity-50 flex items-center text-sm"
+            >
+              <Plus className="h-3 w-3 mr-1" />
+              Comerciais
+            </button>
+          </div>
+          
+          <div className="mb-4">
+            <select
+              value={selectedFolder}
+              onChange={(e) => setSelectedFolder(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+            >
+              <option value="">Selecione uma pasta</option>
+              {folders.map((folder) => (
+                <option key={folder.id} value={folder.id}>
+                  {folder.nome} ({folder.video_count_db || 0} vídeos)
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-2 max-h-96 overflow-y-auto">
+            {availableVideos.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <Video className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                <p>Nenhum vídeo encontrado</p>
+                {selectedFolder && (
+                  <p className="text-sm">Selecione outra pasta</p>
+                )}
+              </div>
+            ) : (
+              availableVideos.map((video) => (
+                <div
+                  key={video.id}
+                  className="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50"
+                >
+                  <div className="flex items-center space-x-3 flex-1 min-w-0">
+                    <Video className="h-4 w-4 text-blue-600" />
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-medium text-gray-900 truncate">{video.nome}</h4>
+                      <div className="flex items-center space-x-2 text-sm text-gray-500">
+                        <span>{formatDuration(video.duracao || 0)}</span>
+                        {video.bitrate_video && <span>{video.bitrate_video} kbps</span>}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center space-x-2">
                     <button
-                      title="Reproduzir playlist"
-                      onClick={() => abrirPlayerPlaylist(playlist.id)}
-                      className="text-green-600 hover:text-green-800 transition p-1"
+                      onClick={() => openVideoPlayer(video)}
+                      className="text-green-600 hover:text-green-800 p-1"
+                      title="Reproduzir vídeo"
                     >
-                      <Play size={16} />
+                      <Play className="h-4 w-4" />
                     </button>
                     <button
-                      title="Iniciar transmissão"
-                      onClick={() => openActionModal(playlist, 'start')}
-                      className="text-blue-600 hover:text-blue-800 transition p-1"
+                      onClick={() => addVideoToPlaylist(video)}
+                      disabled={!selectedPlaylist}
+                      className="text-primary-600 hover:text-primary-800 p-1 disabled:opacity-50"
+                      title="Adicionar à playlist"
                     >
-                      <Play size={16} className="fill-current" />
-                    </button>
-                    <button
-                      title="Agendar playlist"
-                      onClick={() => openActionModal(playlist, 'schedule')}
-                      className="text-purple-600 hover:text-purple-800 transition p-1"
-                    >
-                      <Calendar size={16} />
-                    </button>
-                    <button
-                      title="Editar"
-                      onClick={() => abrirModal(playlist)}
-                      className="text-blue-600 hover:text-blue-800 transition p-1"
-                    >
-                      <Edit2 size={16} />
-                    </button>
-                    <button
-                      title="Deletar"
-                      onClick={() => confirmarDeletarPlaylist(playlist)}
-                      className="text-red-600 hover:text-red-800 transition p-1"
-                    >
-                      <Trash2 size={16} />
+                      <Plus className="h-4 w-4" />
                     </button>
                   </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50 p-2 sm:p-4 overflow-auto">
-          <div className="bg-white rounded-xl p-4 sm:p-8 max-w-[95vw] sm:max-w-[90vw] max-h-[95vh] sm:max-h-[90vh] w-full overflow-auto shadow-2xl border border-gray-300">
-            <form onSubmit={salvarPlaylist} className="h-full flex flex-col">
-              <div className="mb-6">
-                <label htmlFor="nome" className="block mb-2 font-semibold text-gray-800 text-lg">
-                  Nome da playlist
-                </label>
-                <input
-                  id="nome"
-                  type="text"
-                  className="w-full border border-gray-300 rounded-md p-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={nomePlaylist}
-                  onChange={(e) => setNomePlaylist(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="mb-6 flex flex-col lg:flex-row gap-4 lg:gap-6 flex-grow overflow-hidden">
-                {/* Lista de pastas e vídeos disponíveis */}
-                <div className="w-full lg:flex-1 max-h-[300px] lg:max-h-full overflow-y-auto border border-gray-300 rounded-md p-3 bg-gray-50">
-                  <h2 className="font-semibold mb-3 text-gray-900 text-lg">
-                    Vídeos compatíveis disponíveis
-                    <span className="text-sm text-gray-600 font-normal ml-2">
-                      (MP4, ≤{userBitrateLimit} kbps)
-                    </span>
-                  </h2>
-                  {folders.map((folder) => {
-                    const folderVideos = videosByFolder[folder.id] || [];
-                    const compatibleCount = folderVideos.length;
-                    
-                    return (
-                      <div key={folder.id} className="mb-3">
-                        <div
-                          className="flex items-center justify-between cursor-pointer select-none border-b border-gray-200 pb-2 mb-3 hover:bg-gray-100 transition-colors duration-200"
-                          onClick={() => toggleFolder(folder.id)}
-                        >
-                          <div className="flex items-center gap-2">
-                            {expandedFolders[folder.id] ? (
-                              <ChevronDown size={20} className="text-blue-600" />
-                            ) : (
-                              <ChevronRight size={20} className="text-blue-600" />
-                            )}
-                            <span className="font-semibold text-gray-900 text-sm sm:text-lg truncate">
-                              {folder.nome}
-                            </span>
-                            <span className="text-xs text-gray-500 bg-gray-200 px-2 py-1 rounded">
-                              {compatibleCount} compatível(is)
-                            </span>
-                          </div>
-                          {compatibleCount > 0 && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                adicionarTodosDaPasta(folder.id);
-                              }}
-                              className="text-blue-600 hover:text-blue-800 transition-colors duration-200"
-                              title="Adicionar todos da pasta"
-                            >
-                              <PlusCircle size={18} />
-                            </button>
-                          )}
-                        </div>
-
-                        {expandedFolders[folder.id] && (
-                          <DndContext sensors={sensors} onDragEnd={onDragEnd}>
-                            <SortableContext
-                              items={folderVideos.map(v => `available-${v.id}`)}
-                              strategy={verticalListSortingStrategy}
-                            >
-                              <ul>
-                                {folderVideos.map((video, index) => (
-                                  <AvailableVideo key={video.id} video={video} index={index} />
-                                ))}
-                              </ul>
-                            </SortableContext>
-                          </DndContext>
-                        )}
-
-                        {expandedFolders[folder.id] && compatibleCount === 0 && (
-                          <div className="text-center py-4 text-gray-500 text-sm">
-                            <AlertTriangle className="h-8 w-8 mx-auto mb-2 text-gray-300" />
-                            <p>Nenhum vídeo compatível nesta pasta</p>
-                            <p className="text-xs">Vídeos devem ser MP4 com bitrate ≤{userBitrateLimit} kbps</p>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
                 </div>
-
-                {/* Lista de vídeos selecionados na playlist */}
-                <div className="w-full lg:flex-1 max-h-[300px] lg:max-h-full overflow-y-auto border border-gray-300 rounded-md p-3 flex flex-col bg-gray-50">
-                  <h2 className="font-semibold mb-3 flex justify-between items-center text-gray-900 text-lg">
-                    Vídeos na playlist ({selectedVideos.length})
-                    <button
-                      type="button"
-                      onClick={removerTodos}
-                      className="text-red-600 hover:text-red-800 transition-colors duration-200"
-                      title="Remover todos"
-                    >
-                      <X size={20} />
-                    </button>
-                  </h2>
-
-                  <DndContext sensors={sensors} onDragEnd={onDragEnd}>
-                    <SortableContext
-                      items={selectedVideos.map((_, i) => `selected-${i}`)}
-                      strategy={verticalListSortingStrategy}
-                    >
-                      <ul className="flex-grow overflow-y-auto" id="selected-container">
-                        {selectedVideos.length === 0 ? (
-                          <div className="text-center py-8 text-gray-500">
-                            <Play className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-                            <p className="text-sm">Arraste vídeos aqui para criar a playlist</p>
-                          </div>
-                        ) : (
-                          selectedVideos.map((video, index) => (
-                            <SelectedVideo key={`${video.id}-${index}`} video={video} index={index} />
-                          ))
-                        )}
-                      </ul>
-                    </SortableContext>
-                  </DndContext>
-                </div>
-              </div>
-
-              {status && <p className="mb-4 text-red-600 font-semibold">{status}</p>}
-
-              <div className="flex flex-col sm:flex-row justify-end gap-3 mt-auto">
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className="w-full sm:w-auto px-5 py-2 bg-gray-200 rounded-md hover:bg-gray-300 transition-colors duration-200 disabled:opacity-50"
-                  disabled={loading}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="w-full sm:w-auto px-5 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200 disabled:opacity-50"
-                  disabled={loading || selectedVideos.length === 0}
-                >
-                  {loading ? 'Salvando...' : 'Salvar'}
-                </button>
-              </div>
-            </form>
+              ))
+            )}
           </div>
         </div>
-      )}
 
-      {/* Modal do Player Universal */}
-      {videoPlayerModalOpen && currentVideoUrl && (
-        <div 
-          className="fixed inset-0 bg-black bg-opacity-95 flex justify-center items-center z-50 p-4"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) {
-              closePlayerModal();
-            }
-          }}
-        >
-          <div className={`bg-black rounded-lg relative ${
-            isFullscreen ? 'w-screen h-screen' : 'max-w-5xl w-full h-[80vh]'
-          }`}>
-            {/* Controles do Player */}
-            <div className="absolute top-4 left-4 right-4 z-20 flex items-center justify-between">
-              <div className="bg-black bg-opacity-60 text-white px-4 py-2 rounded-lg">
-                <h3 className="font-medium">
-                  {playlistVideosToPlay[playlistPlayerIndex]?.nome || 'Vídeo'}
-                </h3>
-                <p className="text-xs opacity-80">
-                  {playlistVideosToPlay.length > 1 ? 
-                    `${playlistPlayerIndex + 1} de ${playlistVideosToPlay.length}` : 
-                    'Vídeo único'
-                  }
-                </p>
-              </div>
-
+        {/* Playlist Selecionada */}
+        <div className="bg-white rounded-lg shadow-sm p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-xl font-semibold text-gray-800">
+                {selectedPlaylist ? selectedPlaylist.nome : 'Selecione uma Playlist'}
+              </h2>
+              {selectedPlaylist && (
+                <div className="flex items-center space-x-4 text-sm text-gray-500 mt-1">
+                  <span className="flex items-center">
+                    <Video className="h-3 w-3 mr-1" />
+                    {playlistVideos.length} vídeos
+                  </span>
+                  <span className="flex items-center">
+                    <Clock className="h-3 w-3 mr-1" />
+                    {formatDuration(getTotalDuration())}
+                  </span>
+                </div>
+              )}
+            </div>
+            
+            {selectedPlaylist && playlistVideos.length > 0 && (
               <div className="flex items-center space-x-2">
-                {/* Controles de navegação da playlist */}
-                {playlistVideosToPlay.length > 1 && (
-                  <>
-                    <button
-                      onClick={goToPreviousVideo}
-                      disabled={playlistPlayerIndex === 0}
-                      className="text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-full p-2 transition-colors duration-200 shadow-lg"
-                      title="Vídeo anterior"
-                    >
-                      <SkipBack size={16} />
-                    </button>
-
-                    <button
-                      onClick={() => setIsPlaying(!isPlaying)}
-                      className="text-white bg-green-600 hover:bg-green-700 rounded-full p-2 transition-colors duration-200 shadow-lg"
-                      title={isPlaying ? "Pausar" : "Reproduzir"}
-                    >
-                      {isPlaying ? <Pause size={16} /> : <Play size={16} />}
-                    </button>
-
-                    <button
-                      onClick={goToNextVideo}
-                      disabled={playlistPlayerIndex === playlistVideosToPlay.length - 1}
-                      className="text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-full p-2 transition-colors duration-200 shadow-lg"
-                      title="Próximo vídeo"
-                    >
-                      <SkipForward size={16} />
-                    </button>
-                  </>
-                )}
-
                 <button
-                  onClick={() => setIsFullscreen(!isFullscreen)}
-                  className="text-white bg-purple-600 hover:bg-purple-700 rounded-full p-2 transition-colors duration-200 shadow-lg"
-                  title={isFullscreen ? "Sair da tela cheia" : "Tela cheia"}
+                  onClick={shuffleVideos}
+                  className="text-purple-600 hover:text-purple-800 p-2"
+                  title="Embaralhar vídeos"
                 >
-                  {isFullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
+                  <Shuffle className="h-4 w-4" />
                 </button>
-
                 <button
-                  onClick={closePlayerModal}
-                  className="text-white bg-red-600 hover:bg-red-700 rounded-full p-2 transition-colors duration-200 shadow-lg"
-                  title="Fechar player"
+                  onClick={() => navigate(`/dashboard/agendamentos?playlist=${selectedPlaylist.id}`)}
+                  className="text-blue-600 hover:text-blue-800 p-2"
+                  title="Agendar playlist"
                 >
-                  <X size={16} />
+                  <Calendar className="h-4 w-4" />
                 </button>
               </div>
-            </div>
+            )}
+          </div>
 
-            {/* Player iFrame */}
-            <div className="w-full h-full">
-              <IFrameVideoPlayer
-                src={currentVideoUrl}
-                title={playlistVideosToPlay[playlistPlayerIndex]?.nome}
-                autoplay={true}
-                controls={true}
-                className="w-full h-full"
-                onError={(error) => {
-                  console.error('Erro no IFrame player:', error);
-                  toast.error('Erro ao carregar vídeo');
-                }}
-                onReady={() => {
-                  console.log('IFrame player pronto');
-                  setIsPlaying(true);
-                }}
-              />
+          {!selectedPlaylist ? (
+            <div className="text-center py-12 text-gray-500">
+              <List className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+              <p>Selecione uma playlist para gerenciar</p>
             </div>
-
-            {/* Lista de vídeos da playlist (se mais de 1) */}
-            {playlistVideosToPlay.length > 1 && (
-              <div className="absolute bottom-4 left-4 right-4 z-20 bg-black bg-opacity-80 text-white p-4 rounded-lg max-h-32 overflow-y-auto">
-                <h4 className="text-sm font-medium mb-2">Playlist ({playlistVideosToPlay.length} vídeos)</h4>
-                <div className="space-y-1">
-                  {playlistVideosToPlay.map((video, index) => (
-                    <button
+          ) : playlistVideos.length === 0 ? (
+            <div className="text-center py-12 text-gray-500">
+              <Video className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+              <p>Playlist vazia</p>
+              <p className="text-sm">Adicione vídeos da lista ao lado</p>
+            </div>
+          ) : (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext
+                items={playlistVideos.map(video => video.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                <div className="space-y-2 max-h-96 overflow-y-auto">
+                  {playlistVideos.map((video) => (
+                    <SortableVideoItem
                       key={video.id}
-                      onClick={() => {
-                        setPlaylistPlayerIndex(index);
-                        const videoUrl = buildVideoUrl(video);
-                        if (videoUrl) {
-                          setCurrentVideoUrl(videoUrl);
-                        }
-                      }}
-                      className={`w-full text-left px-3 py-2 rounded text-xs transition-colors ${
-                        index === playlistPlayerIndex 
-                          ? 'bg-blue-600 text-white' 
-                          : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="truncate">{index + 1}. {video.nome}</span>
-                        <div className="flex items-center space-x-2 ml-2">
-                          <span className="text-green-400">
-                            {video.bitrate_video || 0} kbps
-                          </span>
-                          {index === playlistPlayerIndex && (
-                            <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
-                          )}
-                        </div>
-                      </div>
-                    </button>
+                      video={video}
+                      onRemove={removeVideoFromPlaylist}
+                    />
                   ))}
                 </div>
+              </SortableContext>
+            </DndContext>
+          )}
+
+          {/* Botões de Ação */}
+          {selectedPlaylist && playlistVideos.length > 0 && (
+            <div className="mt-6 space-y-3">
+              <div className="flex space-x-3">
+                <button
+                  onClick={savePlaylist}
+                  disabled={loading}
+                  className="flex-1 bg-primary-600 text-white px-4 py-2 rounded-md hover:bg-primary-700 disabled:opacity-50 flex items-center justify-center"
+                >
+                  <Save className="h-4 w-4 mr-2" />
+                  {loading ? 'Salvando...' : 'Salvar Playlist'}
+                </button>
+                
+                <button
+                  onClick={saveAndStartPlaylist}
+                  disabled={loading || transmissionStatus?.is_live}
+                  className="flex-1 bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 disabled:opacity-50 flex items-center justify-center"
+                >
+                  <Radio className="h-4 w-4 mr-2" />
+                  {loading ? 'Iniciando...' : 'Salvar e Transmitir'}
+                </button>
               </div>
-            )}
-          </div>
+              
+              <button
+                onClick={() => setPlaylistVideos([])}
+                className="w-full bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 flex items-center justify-center"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Limpar Playlist
+              </button>
+            </div>
+          )}
         </div>
-      )}
+      </div>
 
-      {/* Modal de Ações da Playlist */}
-      {showActionModal && selectedAction && (
+      {/* Modal Nova Playlist */}
+      {showNewPlaylistModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">
-              {selectedAction.type === 'start' && 'Iniciar Transmissão'}
-              {selectedAction.type === 'schedule' && 'Agendar Playlist'}
-              {selectedAction.type === 'pause' && 'Pausar Transmissão'}
-              {selectedAction.type === 'stop' && 'Parar Transmissão'}
-            </h3>
-            
-            <p className="text-gray-700 mb-4">
-              {selectedAction.type === 'start' && `Deseja iniciar a transmissão da playlist "${selectedAction.playlistName}"?`}
-              {selectedAction.type === 'schedule' && `Você será redirecionado para a página de agendamentos para configurar quando a playlist "${selectedAction.playlistName}" deve ser executada.`}
-              {selectedAction.type === 'pause' && `Deseja pausar a transmissão atual?`}
-              {selectedAction.type === 'stop' && `Deseja parar a transmissão atual?`}
-            </p>
-
-            {selectedAction.type === 'start' && (
-              <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
-                <p className="text-sm text-blue-800">
-                  <strong>Nota:</strong> A transmissão será iniciada sem plataformas configuradas. 
-                  Você pode configurar plataformas na página "Iniciar Transmissão".
-                </p>
-              </div>
-            )}
-
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Nova Playlist</h3>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Nome da playlist:
+              </label>
+              <input
+                type="text"
+                value={newPlaylistName}
+                onChange={(e) => setNewPlaylistName(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+                placeholder="Digite o nome da playlist"
+                onKeyPress={(e) => e.key === 'Enter' && createPlaylist()}
+              />
+            </div>
             <div className="flex justify-end space-x-3">
               <button
-                onClick={() => setShowActionModal(false)}
-                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
+                onClick={() => {
+                  setShowNewPlaylistModal(false);
+                  setNewPlaylistName('');
+                }}
+                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
               >
                 Cancelar
               </button>
               <button
-                onClick={executePlaylistAction}
-                className={`px-4 py-2 rounded-md transition-colors text-white ${
-                  selectedAction.type === 'start' ? 'bg-green-600 hover:bg-green-700' :
-                  selectedAction.type === 'schedule' ? 'bg-purple-600 hover:bg-purple-700' :
-                  'bg-red-600 hover:bg-red-700'
-                }`}
+                onClick={createPlaylist}
+                disabled={!newPlaylistName.trim()}
+                className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 disabled:opacity-50"
               >
-                {selectedAction.type === 'start' && 'Iniciar Transmissão'}
-                {selectedAction.type === 'schedule' && 'Ir para Agendamentos'}
-                {selectedAction.type === 'pause' && 'Pausar'}
-                {selectedAction.type === 'stop' && 'Parar'}
+                Criar Playlist
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal de confirmação */}
-      <ModalConfirmacao
-        aberto={modalConfirmacao.aberto}
-        onFechar={() => setModalConfirmacao(prev => ({ ...prev, aberto: false }))}
-        onConfirmar={executarDelecaoPlaylist}
-        titulo={modalConfirmacao.titulo}
-        mensagem={modalConfirmacao.mensagem}
-        detalhes={modalConfirmacao.detalhes}
-      />
+      {/* Modal Editar Playlist */}
+      {showEditModal && editingPlaylist && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Editar Playlist</h3>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Nome da playlist:
+              </label>
+              <input
+                type="text"
+                value={editPlaylistName}
+                onChange={(e) => setEditPlaylistName(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+                placeholder="Digite o novo nome da playlist"
+                onKeyPress={(e) => e.key === 'Enter' && updatePlaylist()}
+              />
+            </div>
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => {
+                  setShowEditModal(false);
+                  setEditingPlaylist(null);
+                  setEditPlaylistName('');
+                }}
+                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={updatePlaylist}
+                disabled={!editPlaylistName.trim()}
+                className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 disabled:opacity-50 flex items-center"
+              >
+                <Save className="h-4 w-4 mr-2" />
+                Salvar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Comerciais */}
+      {showComercialModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-2xl w-full">
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex justify-between items-center">
+                <h3 className="text-lg font-semibold">Configurar Comerciais</h3>
+                <button
+                  onClick={() => setShowComercialModal(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <div className="flex items-start">
+                  <AlertCircle className="h-5 w-5 text-yellow-600 mr-3 mt-0.5" />
+                  <div className="text-yellow-800 text-sm">
+                    <p className="font-medium mb-1">Como funciona:</p>
+                    <ul className="space-y-1">
+                      <li>• Selecione uma pasta que contém vídeos de comerciais</li>
+                      <li>• Configure quantos comerciais inserir e a cada quantos vídeos</li>
+                      <li>• Os comerciais serão inseridos automaticamente entre os vídeos da playlist</li>
+                      <li>• Exemplo: 2 comerciais a cada 10 vídeos</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Pasta de Comerciais *
+                </label>
+                <select
+                  value={comercialConfig.pasta_comerciais}
+                  onChange={(e) => setComercialConfig(prev => ({ ...prev, pasta_comerciais: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+                >
+                  <option value="">Selecione uma pasta de comerciais</option>
+                  {folders.map((folder) => (
+                    <option key={folder.id} value={folder.nome_sanitizado}>
+                      {folder.nome} ({folder.video_count_db || 0} vídeos)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Quantidade de Comerciais
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={comercialConfig.quantidade_comerciais}
+                    onChange={(e) => setComercialConfig(prev => ({ ...prev, quantidade_comerciais: parseInt(e.target.value) || 1 }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Quantos comerciais inserir por vez</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    A cada quantos vídeos
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={comercialConfig.intervalo_videos}
+                    onChange={(e) => setComercialConfig(prev => ({ ...prev, intervalo_videos: parseInt(e.target.value) || 10 }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Inserir comerciais a cada X vídeos</p>
+                </div>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <p className="text-blue-800 text-sm">
+                  <strong>Exemplo:</strong> Com {comercialConfig.quantidade_comerciais} comercial(is) a cada {comercialConfig.intervalo_videos} vídeos, 
+                  em uma playlist de 30 vídeos serão inseridos aproximadamente {Math.floor(30 / comercialConfig.intervalo_videos) * comercialConfig.quantidade_comerciais} comerciais.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-gray-200 flex justify-end space-x-3">
+              <button
+                onClick={() => setShowComercialModal(false)}
+                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={addComercials}
+                disabled={!comercialConfig.pasta_comerciais}
+                className="px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 disabled:opacity-50"
+              >
+                Inserir Comerciais
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal do Player */}
+      {showVideoModal && currentVideo && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-95 flex items-center justify-center z-50 p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              closeVideoPlayer();
+            }
+          }}
+        >
+          <div className="bg-black rounded-lg relative max-w-4xl w-full h-[70vh]">
+            <button
+              onClick={closeVideoPlayer}
+              className="absolute top-4 right-4 z-20 text-white bg-red-600 hover:bg-red-700 rounded-full p-2 transition-colors duration-200 shadow-lg"
+              title="Fechar player"
+            >
+              <X size={16} />
+            </button>
+
+            <div className="w-full h-full">
+              <IFrameVideoPlayer
+                src={buildVideoUrl(currentVideo)}
+                title={currentVideo.nome}
+                autoplay
+                controls
+                className="w-full h-full"
+                onError={(error) => {
+                  console.error('Erro no player:', error);
+                  toast.error('Erro ao carregar vídeo');
+                }}
+                onReady={() => {
+                  console.log('Player pronto');
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Informações de Ajuda */}
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+        <div className="flex items-start">
+          <CheckCircle className="h-5 w-5 text-blue-600 mr-3 mt-0.5" />
+          <div>
+            <h3 className="text-blue-900 font-medium mb-2">🎵 Sistema de Playlists Avançado</h3>
+            <ul className="text-blue-800 text-sm space-y-1">
+              <li>• <strong>Drag & Drop:</strong> Arraste vídeos para reordenar a playlist</li>
+              <li>• <strong>Comerciais integrados:</strong> Insira comerciais automaticamente entre os vídeos</li>
+              <li>• <strong>Transmissão SMIL:</strong> Playlists usam arquivo SMIL para transmissão no Wowza</li>
+              <li>• <strong>Agendamentos:</strong> Agende playlists para transmitir automaticamente</li>
+              <li>• <strong>Visualização em tempo real:</strong> Veja playlists em transmissão</li>
+              <li>• <strong>Múltiplos formatos:</strong> Suporte a MP4, AVI, MOV, WMV, FLV, WebM, MKV</li>
+              <li>• <strong>Controle de bitrate:</strong> Apenas vídeos dentro do limite são incluídos</li>
+              <li>• <strong>Player integrado:</strong> Teste vídeos diretamente na interface</li>
+              <li>• <strong>Estrutura de arquivos:</strong> /home/streaming/usuario/pasta/arquivo.mp4</li>
+              <li>• <strong>URLs de transmissão:</strong> http://samhost.wcore.com.br:1935/usuario/usuario/playlist.m3u8</li>
+            </ul>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
