@@ -426,13 +426,20 @@ class PlaylistSMILService {
 
             const playlist = playlistRows[0];
 
-            // Buscar vídeos da playlist
+            // Buscar vídeos da playlist incluindo comerciais da estrutura antiga
             const [videoRows] = await db.execute(
-                `SELECT v.nome, v.url, v.caminho, v.duracao 
-                 FROM videos v 
-                 WHERE v.playlist_id = ? AND v.codigo_cliente = ?
-                 ORDER BY v.ordem_playlist ASC, v.id ASC`,
-                [playlistId, userId]
+                `SELECT 
+                    COALESCE(v.nome, pv.video) as nome,
+                    COALESCE(v.url, pv.path_video) as url,
+                    COALESCE(v.caminho, pv.path_video) as caminho,
+                    COALESCE(v.duracao, pv.duracao_segundos, 0) as duracao,
+                    COALESCE(pv.tipo, 'video') as tipo,
+                    COALESCE(v.ordem_playlist, pv.ordem, 0) as ordem
+                 FROM playlists_videos pv
+                 LEFT JOIN videos v ON v.playlist_id = ? AND v.codigo_cliente = ?
+                 WHERE pv.codigo_playlist = ?
+                 ORDER BY pv.ordem ASC, pv.codigo ASC`,
+                [playlistId, userId, playlistId]
             );
 
             if (videoRows.length === 0) {

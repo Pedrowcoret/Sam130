@@ -66,6 +66,12 @@ const IFrameVideoPlayer: React.FC<IFrameVideoPlayerProps> = ({
       
       return `${baseUrl}/api/player-port/iframe?stream=${userLogin}_playlist&player=1&contador=true&compartilhamento=true`;
     }
+    
+    // Para URLs de playlist específica (formato: playlist=ID)
+    if (videoPath.includes('playlist=')) {
+      return videoPath;
+    }
+    
     // Extrair informações do caminho
     const cleanPath = videoPath.replace(/^\/+/, '').replace(/^(content\/|streaming\/)?/, '');
     const pathParts = cleanPath.split('/');

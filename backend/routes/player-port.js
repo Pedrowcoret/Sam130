@@ -67,10 +67,10 @@ router.get('/iframe', async (req, res) => {
             userLogin = userData.usuario || (userData.email ? userData.email.split('@')[0] : userLogin);
           }
           
-          const wowzaHost = 'stmv1.udicast.com'; // SEMPRE usar domínio
+          const wowzaHost = process.env.NODE_ENV === 'production' ? 'samhost.wcore.com.br' : 'samhost.wcore.com.br';
           
           // Para transmissão SMIL, usar URL específica
-          videoUrl = `https://${wowzaHost}:1935/${userLogin}/${userLogin}/playlist.m3u8`;
+          videoUrl = `http://${wowzaHost}:1935/${userLogin}/${userLogin}/playlist.m3u8`;
           title = `Playlist: ${transmission.playlist_nome}`;
           isLive = true;
           
@@ -89,20 +89,20 @@ router.get('/iframe', async (req, res) => {
               const fallbackUserLogin = userData.usuario || (userData.email ? userData.email.split('@')[0] : userLogin);
               
               // Buscar domínio do servidor Wowza
-              let wowzaHost = 'stmv1.udicast.com'; // SEMPRE usar domínio
+              let wowzaHost = process.env.NODE_ENV === 'production' ? 'samhost.wcore.com.br' : 'samhost.wcore.com.br';
               try {
                 const [serverRows] = await db.execute(
                   'SELECT dominio, ip FROM wowza_servers WHERE status = "ativo" LIMIT 1'
                 );
                 if (serverRows.length > 0) {
                   // SEMPRE usar domínio, nunca IP
-                  wowzaHost = 'stmv1.udicast.com';
+                  wowzaHost = process.env.NODE_ENV === 'production' ? 'samhost.wcore.com.br' : 'samhost.wcore.com.br';
                 }
               } catch (error) {
                 console.warn('Erro ao buscar domínio do servidor:', error.message);
               }
               
-              videoUrl = `https://${wowzaHost}:1935/samhost/${fallbackUserLogin}_live/playlist.m3u8`;
+              videoUrl = `http://${wowzaHost}:1935/samhost/${fallbackUserLogin}_live/playlist.m3u8`;
               title = `Stream OBS - ${fallbackUserLogin}`;
               isLive = true;
             } else {
